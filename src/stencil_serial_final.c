@@ -1,7 +1,7 @@
 /* -----------------------------------------------------------------------------
- * prototipo.c -- serial driver prototype for the 5-point stencil.
+ * stencil_serial_final.c -- serial driver for the 5-point stencil.
  *
- * Starts from stencil_template_serial.c, with a few conservative changes:
+ * Final serial implementation, with:
  * - aligned allocation with posix_memalign;
  * - separate OLD/NEW allocations, released separately;
  * - wall-clock timing for update, injection, and energy reduction;
@@ -13,7 +13,7 @@
 #define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
 
-#include "stencil_template_serial.h"
+#include "stencil_serial_final.h"
 
 #ifdef _OPENMP
 #include <omp.h>
