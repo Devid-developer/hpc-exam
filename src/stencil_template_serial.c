@@ -10,7 +10,7 @@
 
 #include "stencil_template_serial.h"
 
-int dump ( const double *, const uint [2], const char *, double *, double * );
+int dump ( const double *, const unsigned int [2], const char *, double *, double * );
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
@@ -111,13 +111,13 @@ int memory_allocate ( const int [2],
 		      double ** );
 
 
-int initialize_sources( uint      [2],
+int initialize_sources( unsigned int [2],
 			int       ,
 			int     ** );
 
 int initialize ( int      argc,                // the argc from command line
 		 char   **argv,                // the argv from command line
-		 int     *S,                   // two-uint array defining the x,y dimensions of the grid
+		 int     *S,                   // two-unsigned-int array defining the x,y dimensions of the grid
 		 int     *periodic,            // periodic-boundary tag
 		 int     *Niterations,         // how many iterations
 		 int     *Nsources,            // how many heat sources
@@ -154,10 +154,10 @@ int initialize ( int      argc,                // the argc from command line
       {
 	switch( opt )
 	  {
-	  case 'x': S[_x_] = (uint)atoi(optarg);
+	  case 'x': S[_x_] = (unsigned int)atoi(optarg);
 	    break;
 
-	  case 'y': S[_y_] = (uint)atoi(optarg);
+	  case 'y': S[_y_] = (unsigned int)atoi(optarg);
 	    break;
 
 	  case 'e': *Nsources = atoi(optarg);
@@ -263,7 +263,7 @@ int memory_allocate ( const int      size[2],
 }
 
 
-int initialize_sources( uint      size[2],
+int initialize_sources( unsigned int size[2],
 			int       Nsources,
 			int     **Sources )
 /*
@@ -271,7 +271,7 @@ int initialize_sources( uint      size[2],
  *
  */
 {
-  *Sources = (int*)malloc( Nsources * 2 *sizeof(uint) );
+  *Sources = (int*)malloc( Nsources * 2 *sizeof(unsigned int) );
   for ( int s = 0; s < Nsources; s++ )
     {
       (*Sources)[s*2] = 1+ lrand48() % size[_x_];
@@ -299,7 +299,7 @@ int memory_release ( double *data, int *sources )
 
 
 
-int dump ( const double *data, const uint size[2], const char *filename, double *min, double *max )
+int dump ( const double *data, const unsigned int size[2], const char *filename, double *min, double *max )
 {
   if ( (filename != NULL) && (filename[0] != '\0') )
     {
@@ -341,4 +341,3 @@ int dump ( const double *data, const uint size[2], const char *filename, double 
   else return 1;
   
 }
-
