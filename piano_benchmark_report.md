@@ -48,7 +48,7 @@ Usare un solo processo Slurm e variare `--cpus-per-task` e `OMP_NUM_THREADS`:
 OMP_NUM_THREADS=P
 ```
 
-Su un nodo Booster di Leonardo è presente un singolo socket Intel Xeon Platinum 8358 Ice Lake con 32 core fisici e 512 GiB di memoria DDR4. Non esiste quindi il confine NUMA tra due socket presente sui nodi DCGP e il massimo OpenMP naturale è 32 thread, non 112.
+Su un nodo Booster di Leonardo è presente un singolo socket Intel Xeon Platinum 8358 Ice Lake con 32 core fisici e 512 GiB di memoria DDR4. Il nodo misurato espone però due domini NUMA interni al socket, rispettivamente sui core `0-15` e `16-31`, effetto del Sub-NUMA Clustering. Il massimo OpenMP naturale è 32 thread, non 112, ma binding e first touch devono comunque considerare entrambi i domini NUMA.
 
 Una sequenza consigliata è:
 
@@ -73,6 +73,8 @@ srun --cpu-bind=cores ./stencil_serial_final_omp ...
 ```
 
 `close` è un buon punto di partenza per sfruttare la località. Un confronto `close` contro `spread` può essere interessante, ma va considerato un esperimento secondario e non mescolato con quello sullo scheduler.
+
+Sul Booster il confronto è particolarmente rilevante. Con `close` e non più di 16 thread l'allocazione può usare principalmente un solo dominio NUMA; con `spread`, se la CPU mask assegnata al processo comprende tutti i 32 core, i thread possono essere distribuiti sui due domini e sfruttare più bandwidth. Per un confronto controllato conviene riservare al processo OpenMP l'intera CPU mask da 32 core, variare soltanto `OMP_NUM_THREADS` e confrontare `close`/`spread` mantenendo identico il first touch.
 
 ### 2.3 Esperimenti MPI e ibridi
 

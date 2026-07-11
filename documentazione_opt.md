@@ -113,7 +113,7 @@ Sessantaquattro byte corrispondono alla dimensione tipica di una cache line sull
 
 Entrambi i piani vengono inizializzati a zero. Quando OpenMP è attivo, anche l'inizializzazione è suddivisa staticamente tra i thread. Sui sistemi NUMA la politica *first touch* assegna normalmente una pagina fisica al dominio NUMA del core che la tocca per primo. Parallelizzare l'inizializzazione con una distribuzione coerente con quella usata nel kernel può quindi migliorare l'affinità della memoria nelle esecuzioni multicore.
 
-Per l'esecuzione a un thread il medesimo codice resta seriale. Sul Booster è comunque importante impostare correttamente il pinning. Il nodo è single-socket, quindi non è necessario studiare l'attraversamento di un confine NUMA tra due socket; resta invece importante osservare quando il kernel memory-bound satura la bandwidth disponibile prima di raggiungere tutti i 32 core.
+Per l'esecuzione a un thread il medesimo codice resta seriale. Sul Booster è comunque importante impostare correttamente il pinning. Le misure sul nodo `lrdn1549` mostrano un solo socket fisico suddiviso mediante Sub-NUMA Clustering in due domini NUMA: core `0-15` e core `16-31`. Non esiste un confine tra socket, ma esiste quindi un confine NUMA interno al socket. First touch e affinità devono distribuire pagine e thread coerentemente sui due domini. Con `OMP_PROC_BIND=close`, fino a 16 thread il calcolo può restare concentrato su un dominio e sfruttare soltanto parte della bandwidth; usando più di 16 core entra in gioco anche il secondo dominio.
 
 ## 5. Parallelizzazione OpenMP
 
