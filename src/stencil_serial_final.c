@@ -13,7 +13,15 @@
 #define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
 
-#include "stencil_serial_final.h"
+#ifndef STENCIL_HEADER
+#define STENCIL_HEADER "stencil_serial_final.h"
+#endif
+#include STENCIL_HEADER
+
+#include <getopt.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -356,7 +364,7 @@ static int memory_release_proto(double **planes, int *sources)
 
 static int dump_proto(const double *data, const int size[2], const char *filename)
 {
-    const int fxsize = size[_x_] + 2;
+    const size_t fxsize = (size_t)size[_x_] + 2;
     float *row;
     FILE *outfile;
 

@@ -3,25 +3,12 @@
  * See COPYRIGHT in top-level directory.
  */
 
+#ifndef STENCIL_SERIAL_FINAL_H
+#define STENCIL_SERIAL_FINAL_H
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <time.h>
-#include <float.h>
-#include <math.h>
+#include <stddef.h>
 
 
-
-#define NORTH 0
-#define SOUTH 1
-#define EAST  2
-#define WEST  3
-
-#define SEND 0
-#define RECV 1
 
 #define OLD 0
 #define NEW 1
@@ -34,47 +21,23 @@
 #define C_NEIGH   (0.25*(1.0-ALPHA))   // = 0.1
 
 
-// ============================================================
-//
-// function prototypes
-
-int initialize ( int      ,
-		 char   **,
-		 int    *,
-		 int     *,
-		 int     *,
-		 int     *,
-		 int   **,
-		 double  *,
-		 double **,
-                 int     *,
-                 int     *
-		 );
-
-int memory_release ( double *, int * );
-
-
 static inline int inject_energy ( const  int,
-                           const int    ,
-			   const int   *,
-			   const double  ,
-			   const int    [2],
-                                 double * );
+                                  const int    ,
+			                      const int   *,
+			                      const double  ,
+			                      const int    [2],
+                                  double * );
 
 static inline int update_plane ( const int       ,
-			  const int    [2],
-			  const double   *,
-		                double   * );
+			                     const int    [2],
+			                     const double   *,
+		                         double   * );
 
 
 static inline int get_total_energy( const int     [2],
                              const double *,
                              double * );
 
-
-// ============================================================
-//
-// function definition for inline functions
 
 static inline int inject_energy(const int     periodic,
                                 const int     Nsources,
@@ -83,9 +46,9 @@ static inline int inject_energy(const int     periodic,
                                 const int     size[2],
                                 double       *plane)
 {
-    const int fxsize = size[_x_] + 2;
+    const size_t fxsize = (size_t)size[_x_] + 2;
 
-#define IDX(i,j) ( (size_t)(j)*fxsize + (i) )
+#define IDX(i,j) ( (size_t)(j)*fxsize + (size_t)(i) )
 
     for (int s = 0; s < Nsources; s++) {
         const int x = Sources[2*s];
@@ -110,14 +73,16 @@ static inline int update_plane ( const int     periodic,
                           double       *restrict new    )
 
 {
-    const int  fxsize = size[_x_]+2;
+    const size_t fxsize = (size_t)size[_x_]+2;
     const int  xsize = size[_x_];
     const int  ysize = size[_y_];
     const double cc = C_CENTER;
     const double cn = C_NEIGH;
     
 
-
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (int j = 1; j <= ysize; j++) {
         const double *restrict center = old + (size_t)j      *fxsize;
         const double *restrict north  = old + (size_t)(j-1)  *fxsize;
@@ -130,7 +95,7 @@ static inline int update_plane ( const int     periodic,
 
     if ( periodic ) {
 
-       #define IDX( i, j ) ( (size_t)(j)*fxsize + (i) )
+       #define IDX( i, j ) ( (size_t)(j)*fxsize + (size_t)(i) )
 
             for ( int i = 1; i <= xsize; i++ ) {
                     new[ IDX(i, 0) ]        = new[ IDX(i, ysize) ];
@@ -154,7 +119,7 @@ static inline int get_total_energy( const int     size[2],
                                    double *energy )
 
 {
-    const int fxsize = size[_x_] + 2;
+    const size_t fxsize = (size_t)size[_x_] + 2;
     const int xsize  = size[_x_];
     const int ysize  = size[_y_];
 
@@ -163,7 +128,9 @@ static inline int get_total_energy( const int     size[2],
 #else
     double tot = 0.0;
 #endif
-
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) reduction(+:tot)
+#endif
     for ( int j = 1; j <= ysize; j++ ) {
         const double *line = plane + (size_t)j*fxsize;
         for ( int i = 1; i <= xsize; i++ )
@@ -174,4 +141,5 @@ static inline int get_total_energy( const int     size[2],
     *energy = (double)tot;
     return 0;
 }
-                            
+
+#endif
