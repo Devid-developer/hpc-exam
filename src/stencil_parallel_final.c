@@ -59,6 +59,7 @@ static int initialize_sources(int rank, MPI_Comm *comm,
                               int *nsources_local, vec2_t **sources_local);
 static int exchange_halos(const int neighbours[4], MPI_Comm *comm,
                           plane_t *plane, buffers_t buffers[2]);
+static int global_max_int(int local_value, MPI_Comm *comm);
 static int memory_release(plane_t planes[2], buffers_t buffers[2],
                           vec2_t *sources_local);
 static int output_energy_stat(int step, const plane_t *plane, double budget,
@@ -73,7 +74,7 @@ static void print_decomposition(int rank, int ntasks,
 
 int main(int argc, char **argv)
 {
-    MPI_Comm my_comm_world;
+    MPI_Comm my_comm_world = MPI_COMM_WORLD;
     int rank;
     int ntasks;
     int level_obtained;
@@ -101,7 +102,6 @@ int main(int argc, char **argv)
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &level_obtained);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &ntasks);
-    MPI_Comm_dup(MPI_COMM_WORLD, &my_comm_world);
 
     if (level_obtained < MPI_THREAD_FUNNELED) {
         if (rank == 0)
@@ -143,10 +143,7 @@ int main(int argc, char **argv)
 
     ret = memory_allocate(planes, buffers);
     {
-        int any_failure = 0;
-        MPI_Allreduce(&ret, &any_failure, 1, MPI_INT, MPI_MAX,
-                      my_comm_world);
-        ret = any_failure;
+        ret = global_max_int(ret, &my_comm_world);
     }
     if (ret != 0) {
         if (rank == 0)
@@ -504,8 +501,7 @@ static int initialize_sources(int rank, MPI_Comm *comm,
 
     global_sources = malloc((size_t)nsources * sizeof(*global_sources));
     int local_failure = (global_sources == NULL);
-    int any_failure = 0;
-    MPI_Allreduce(&local_failure, &any_failure, 1, MPI_INT, MPI_MAX, *comm);
+    int any_failure = global_max_int(local_failure, comm);
     if (any_failure) {
         free(global_sources);
         return 1;
@@ -556,7 +552,7 @@ static int initialize_sources(int rank, MPI_Comm *comm,
     }
 
     local_failure = (nlocal > 0 && *sources_local == NULL);
-    MPI_Allreduce(&local_failure, &any_failure, 1, MPI_INT, MPI_MAX, *comm);
+    any_failure = global_max_int(local_failure, comm);
     if (any_failure) {
         free(*sources_local);
         *sources_local = NULL;
@@ -662,6 +658,15 @@ static int exchange_halos(const int neighbours[4], MPI_Comm *comm,
 
 #undef IDX
     return 0;
+}
+
+static int global_max_int(int local_value, MPI_Comm *comm)
+{
+    int global_value = 0;
+
+    MPI_Reduce(&local_value, &global_value, 1, MPI_INT, MPI_MAX, 0, *comm);
+    MPI_Bcast(&global_value, 1, MPI_INT, 0, *comm);
+    return global_value;
 }
 
 static int memory_release(plane_t planes[2], buffers_t buffers[2],
