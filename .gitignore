@@ -1,1 +1,4 @@
 build/
+results/
+slurm-*.out
+slurm-*.err

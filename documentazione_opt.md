@@ -155,6 +155,10 @@ Sono state aggiunte due modalità utili alla riproducibilità:
 - sorgenti pseudocasuali con seed selezionabile tramite `-s`;
 - sorgenti deterministiche nelle posizioni a un quarto e tre quarti del dominio tramite `-F`.
 
+Gli script di benchmark usano la modalità pseudocasuale predefinita: non passano
+`-F`. La modalità deterministica resta disponibile soltanto per i test di
+correttezza.
+
 ## 7. Parsing e validazione della riga di comando
 
 Per mantenere il parsing semplice e vicino al template iniziale, la conversione degli argomenti usa `atoi`, `atol` e `atof`. Dopo la conversione vengono comunque controllati dominio positivo, numero positivo di iterazioni, numero non negativo di sorgenti ed energia non negativa.
@@ -217,16 +221,25 @@ Una riga CSV facilita la raccolta automatica dei risultati senza dover estrarre 
 
 ## 11. Makefile e modalità di compilazione
 
-Il Makefile definisce target distinti per lo stesso sorgente:
+Il Makefile definisce target distinti per template e versione finale, a entrambi
+i livelli di ottimizzazione richiesti:
 
 ```text
-make all       -> build senza -fopenmp
-make omp       -> build con -fopenmp
-make run       -> esempio single-core
-make run-omp   -> esempio OpenMP
+make all               -> tutte le build seriali e OpenMP
+make template-serial   -> template -O1 e -O3
+make final-serial      -> finale -O1 e -O3
+make omp-serial        -> binario finale OpenMP -O3 dedicato
+make run-template-o1  -> esecuzione del target template -O1
+make run-final-o3     -> esecuzione del target finale -O3
+make run-omp          -> esempio OpenMP
 ```
 
-La build predefinita usa C11, `-O3`, `-Wall` e `-Wextra`. `-O3` abilita trasformazioni aggressive sui loop e la vettorizzazione automatica. La versione OpenMP aggiunge `-fopenmp`, che abilita sia l'interpretazione dei pragma sia il collegamento con il runtime OpenMP.
+La variabile `CFLAGS` contiene `-O3 -Wall -Wextra -march=native -fopenmp
+-Iinclude -g`. I target seriali rimuovono `-fopenmp` e selezionano `-O1` oppure
+`-O3`; il target OpenMP mantiene invece `-fopenmp`. In questo modo il confronto
+seriale non include il runtime OpenMP, mentre `go_omp_serial.sh` misura anche la
+build OpenMP con un thread. `-O3` abilita trasformazioni aggressive sui loop e
+la vettorizzazione automatica.
 
 Per Leonardo le opzioni specifiche dell'architettura e del compilatore saranno definite durante la fase di benchmark. Un flag come `-march=native` può produrre codice adatto al nodo su cui avviene la compilazione, ma va usato sui compute node appropriati e non indiscriminatamente sui login node o tra partizioni con microarchitetture diverse.
 

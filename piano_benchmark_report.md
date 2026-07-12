@@ -69,7 +69,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PLACES=cores
 export OMP_PROC_BIND=close
 export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
-srun --cpu-bind=cores ./stencil_serial_final_omp ...
+srun --cpu-bind=cores ./stencil_serial_final_omp_O3 ...
 ```
 
 `close` è un buon punto di partenza per sfruttare la località. Un confronto `close` contro `spread` può essere interessante, ma va considerato un esperimento secondario e non mescolato con quello sullo scheduler.

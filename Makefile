@@ -1,69 +1,76 @@
-CC ?= gcc
-MPICC ?= mpicc
+CC = gcc
 
-CPPFLAGS ?= -Iinclude
-CFLAGS ?= -std=c11 -O3 -Wall -Wextra
-OMPFLAGS ?= -fopenmp
-
-OMP_NUM_THREADS ?= 4
-MPI_TASKS ?= 4
-MPI_LAUNCH ?= srun
-RUN_ARGS ?= -x 1000 -y 1000 -n 100 -e 4 -p 1 -F -o 0
+CFLAGS = -O3 -Wall -Wextra -march=native -fopenmp -Iinclude -g
+ARGS = -x 25000 -y 25000 -n 200 -o 0
 
 SRC_DIR := src
 INCLUDE_DIR := include
-BUILD_DIR := build
+BUILD_DIR ?= build
 
-SERIAL_SRC := $(SRC_DIR)/stencil_serial_final.c
-PARALLEL_SRC := $(SRC_DIR)/stencil_parallel_final.c
+TEMPLATE_SRC := $(SRC_DIR)/stencil_template_serial.c
+FINAL_SRC := $(SRC_DIR)/stencil_serial_final.c
 
-BASE_BIN := $(BUILD_DIR)/stencil_serial_base
-SERIAL_BIN := $(BUILD_DIR)/stencil_serial_final
-OPENMP_BIN := $(BUILD_DIR)/stencil_serial_final_omp
-MPI_BIN := $(BUILD_DIR)/stencil_parallel_final
+TEMPLATE_O1_BIN := $(BUILD_DIR)/stencil_template_serial_O1
+TEMPLATE_O3_BIN := $(BUILD_DIR)/stencil_template_serial_O3
+FINAL_O1_BIN := $(BUILD_DIR)/stencil_serial_final_O1
+FINAL_O3_BIN := $(BUILD_DIR)/stencil_serial_final_O3
+OMP_O3_BIN := $(BUILD_DIR)/stencil_serial_final_omp_O3
 
-.PHONY: all base serial openmp omp mpi \
-	run-base run-serial run-openmp run-omp run-mpi run clean
+# Keep the pure-serial comparison separate from the OpenMP-at-one-thread run.
+# CFLAGS contains every requested flag; serial targets remove only -fopenmp.
+COMMON_CFLAGS := $(filter-out -O% -fopenmp,$(CFLAGS))
+O1_CFLAGS := -O1 $(COMMON_CFLAGS)
+O3_CFLAGS := -O3 $(COMMON_CFLAGS)
+OMP_O3_CFLAGS := -O3 $(COMMON_CFLAGS) -fopenmp
 
-all: base serial openmp
+.PHONY: all template-serial template-o1 template-o3 \
+	final-serial final-o1 final-o3 omp-serial \
+	run-template-o1 run-template-o3 run-final-o1 run-final-o3 run-omp clean
 
-base: $(BASE_BIN)
+all: template-serial final-serial omp-serial
 
-serial: $(SERIAL_BIN)
+template-serial: template-o1 template-o3
+template-o1: $(TEMPLATE_O1_BIN)
+template-o3: $(TEMPLATE_O3_BIN)
 
-openmp omp: $(OPENMP_BIN)
+final-serial: final-o1 final-o3
+final-o1: $(FINAL_O1_BIN)
+final-o3: $(FINAL_O3_BIN)
 
-mpi: $(MPI_BIN)
+omp-serial: $(OMP_O3_BIN)
 
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+	mkdir -p $@
 
-$(BASE_BIN): $(SERIAL_SRC) $(INCLUDE_DIR)/stencil_template_serial.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) \
-		-DSTENCIL_HEADER='"stencil_template_serial.h"' $< -o $@
+$(TEMPLATE_O1_BIN): $(TEMPLATE_SRC) $(INCLUDE_DIR)/stencil_template_serial.h | $(BUILD_DIR)
+	$(CC) $(O1_CFLAGS) $< -o $@
 
-$(SERIAL_BIN): $(SERIAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@
+$(TEMPLATE_O3_BIN): $(TEMPLATE_SRC) $(INCLUDE_DIR)/stencil_template_serial.h | $(BUILD_DIR)
+	$(CC) $(O3_CFLAGS) $< -o $@
 
-$(OPENMP_BIN): $(SERIAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(OMPFLAGS) $< -o $@
+$(FINAL_O1_BIN): $(FINAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
+	$(CC) $(O1_CFLAGS) $< -o $@
 
-$(MPI_BIN): $(PARALLEL_SRC) $(INCLUDE_DIR)/stencil_parallel_final.h | $(BUILD_DIR)
-	$(MPICC) $(CPPFLAGS) $(CFLAGS) $< -o $@
+$(FINAL_O3_BIN): $(FINAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
+	$(CC) $(O3_CFLAGS) $< -o $@
 
-run-base: $(BASE_BIN)
-	$(BASE_BIN) $(RUN_ARGS)
+$(OMP_O3_BIN): $(FINAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
+	$(CC) $(OMP_O3_CFLAGS) $< -o $@
 
-run-serial run: $(SERIAL_BIN)
-	$(SERIAL_BIN) $(RUN_ARGS)
+run-template-o1: $(TEMPLATE_O1_BIN)
+	OMP_NUM_THREADS=1 $< $(ARGS)
 
-run-openmp run-omp: $(OPENMP_BIN)
-	OMP_NUM_THREADS=$(OMP_NUM_THREADS) OMP_PLACES=cores OMP_PROC_BIND=close \
-		$(OPENMP_BIN) $(RUN_ARGS)
+run-template-o3: $(TEMPLATE_O3_BIN)
+	OMP_NUM_THREADS=1 $< $(ARGS)
 
-run-mpi: $(MPI_BIN)
-	OMP_NUM_THREADS=1 $(MPI_LAUNCH) --ntasks=$(MPI_TASKS) \
-		--cpus-per-task=1 --cpu-bind=cores $(MPI_BIN) $(RUN_ARGS)
+run-final-o1: $(FINAL_O1_BIN)
+	OMP_NUM_THREADS=1 $< $(ARGS)
+
+run-final-o3: $(FINAL_O3_BIN)
+	OMP_NUM_THREADS=1 $< $(ARGS)
+
+run-omp: $(OMP_O3_BIN)
+	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-32} OMP_PLACES=cores OMP_PROC_BIND=close $< $(ARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)
