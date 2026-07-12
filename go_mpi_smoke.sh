@@ -31,7 +31,7 @@ mkdir -p "${RAW_DIR}"
 cd "${PROJECT_DIR}"
 exec > >(tee "${RUN_DIR}/job.out") 2> >(tee "${RUN_DIR}/job.err" >&2)
 
-module load gcc/12.2.0
+module purge
 module load openmpi/4.1.6--gcc--12.2.0
 
 extract_metrics()
