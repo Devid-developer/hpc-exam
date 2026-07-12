@@ -1,4 +1,5 @@
 CC = gcc
+MPICC = mpicc
 
 CFLAGS = -O3 -Wall -Wextra -march=native -fopenmp -Iinclude -g
 ARGS = -x 25000 -y 25000 -n 200 -o 0
@@ -9,12 +10,14 @@ BUILD_DIR ?= build
 
 TEMPLATE_SRC := $(SRC_DIR)/stencil_template_serial.c
 FINAL_SRC := $(SRC_DIR)/stencil_serial_final.c
+MPI_SRC := $(SRC_DIR)/stencil_parallel_final.c
 
 TEMPLATE_O1_BIN := $(BUILD_DIR)/stencil_template_serial_O1
 TEMPLATE_O3_BIN := $(BUILD_DIR)/stencil_template_serial_O3
 FINAL_O1_BIN := $(BUILD_DIR)/stencil_serial_final_O1
 FINAL_O3_BIN := $(BUILD_DIR)/stencil_serial_final_O3
 OMP_O3_BIN := $(BUILD_DIR)/stencil_serial_final_omp_O3
+MPI_O3_BIN := $(BUILD_DIR)/stencil_parallel_final_mpi_O3
 
 # Keep the pure-serial comparison separate from the OpenMP-at-one-thread run.
 # CFLAGS contains every requested flag; serial targets remove only -fopenmp.
@@ -25,7 +28,8 @@ OMP_O3_CFLAGS := -O3 $(COMMON_CFLAGS) -fopenmp
 
 .PHONY: all template-serial template-o1 template-o3 \
 	final-serial final-o1 final-o3 omp-serial \
-	run-template-o1 run-template-o3 run-final-o1 run-final-o3 run-omp clean
+	mpi run-template-o1 run-template-o3 run-final-o1 run-final-o3 \
+	run-omp run-mpi clean
 
 all: template-serial final-serial omp-serial
 
@@ -38,6 +42,8 @@ final-o1: $(FINAL_O1_BIN)
 final-o3: $(FINAL_O3_BIN)
 
 omp-serial: $(OMP_O3_BIN)
+
+mpi: $(MPI_O3_BIN)
 
 $(BUILD_DIR):
 	mkdir -p $@
@@ -57,6 +63,9 @@ $(FINAL_O3_BIN): $(FINAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DI
 $(OMP_O3_BIN): $(FINAL_SRC) $(INCLUDE_DIR)/stencil_serial_final.h | $(BUILD_DIR)
 	$(CC) $(OMP_O3_CFLAGS) $< -o $@
 
+$(MPI_O3_BIN): $(MPI_SRC) $(INCLUDE_DIR)/stencil_parallel_final.h | $(BUILD_DIR)
+	$(MPICC) $(OMP_O3_CFLAGS) $< -o $@
+
 run-template-o1: $(TEMPLATE_O1_BIN)
 	OMP_NUM_THREADS=1 $< $(ARGS)
 
@@ -71,6 +80,9 @@ run-final-o3: $(FINAL_O3_BIN)
 
 run-omp: $(OMP_O3_BIN)
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-32} OMP_PLACES=cores OMP_PROC_BIND=close $< $(ARGS)
+
+run-mpi: $(MPI_O3_BIN)
+	OMP_NUM_THREADS=1 mpirun -np $${MPI_TASKS:-4} $< $(ARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

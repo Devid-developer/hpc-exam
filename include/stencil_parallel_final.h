@@ -10,6 +10,9 @@
 #define EAST  2
 #define WEST  3
 
+#define SEND 0
+#define RECV 1
+
 #define OLD 0
 #define NEW 1
 
@@ -22,6 +25,7 @@
 
 typedef unsigned int uint;
 typedef uint vec2_t[2];
+typedef double *restrict buffers_t[4];
 
 typedef struct {
     double *restrict data;
@@ -38,16 +42,28 @@ static inline int inject_energy(const int periodic,
     const size_t fxsize = (size_t)plane->size[_x_] + 2;
     double *restrict data = plane->data;
 
-    /* Periodic copies, including the one-rank case, are produced by the
-       halo exchange that immediately follows injection. */
-    (void)periodic;
-    (void)process_grid;
-
 #define IDX(i, j) ((size_t)(j) * fxsize + (size_t)(i))
     for (int s = 0; s < nsources; s++) {
         const uint x = sources[s][_x_];
         const uint y = sources[s][_y_];
         data[IDX(x, y)] += energy;
+
+        /* A direction represented by one rank applies its periodic boundary
+           locally.  Multi-rank directions are propagated by halo exchange. */
+        if (periodic) {
+            if (process_grid[_x_] == 1) {
+                if (x == 1)
+                    data[IDX(plane->size[_x_] + 1, y)] += energy;
+                if (x == plane->size[_x_])
+                    data[IDX(0, y)] += energy;
+            }
+            if (process_grid[_y_] == 1) {
+                if (y == 1)
+                    data[IDX(x, plane->size[_y_] + 1)] += energy;
+                if (y == plane->size[_y_])
+                    data[IDX(x, 0)] += energy;
+            }
+        }
     }
 #undef IDX
 
@@ -67,10 +83,6 @@ static inline int update_plane(const int periodic,
     const double *restrict old = oldplane->data;
     double *restrict new = newplane->data;
 
-    /* Boundary conditions are already represented in oldplane's halos. */
-    (void)periodic;
-    (void)process_grid;
-
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -84,6 +96,26 @@ static inline int update_plane(const int periodic,
             result[i] = cc * center[i] +
                         cn * (north[i] + south[i] +
                               center[i - 1] + center[i + 1]);
+    }
+
+    /* Multi-rank directions are refreshed by halo exchange at the beginning
+       of the next iteration.  One-rank directions are completed locally. */
+    if (periodic) {
+#define IDX(i, j) ((size_t)(j) * fxsize + (size_t)(i))
+        if (process_grid[_y_] == 1) {
+            for (uint i = 1; i <= xsize; i++) {
+                new[IDX(i, 0)] = new[IDX(i, ysize)];
+                new[IDX(i, ysize + 1)] = new[IDX(i, 1)];
+            }
+        }
+
+        if (process_grid[_x_] == 1) {
+            for (uint j = 1; j <= ysize; j++) {
+                new[IDX(0, j)] = new[IDX(xsize, j)];
+                new[IDX(xsize + 1, j)] = new[IDX(1, j)];
+            }
+        }
+#undef IDX
     }
 
     return 0;
