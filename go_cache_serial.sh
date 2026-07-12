@@ -1,0 +1,133 @@
+#!/bin/bash
+#SBATCH --job-name=stencil_cache_serial
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --hint=nomultithread
+#SBATCH --exclusive
+#SBATCH --time=00:30:00
+#SBATCH --account=IscrB_SPIESMD
+#SBATCH --partition=boost_usr_prod
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
+
+set -euo pipefail
+
+PROJECT_DIR=${SLURM_SUBMIT_DIR:?Submit this job from the repository root}
+RESULTS_ROOT=${RESULTS_ROOT:-${PROJECT_DIR}/results}
+RUN_DIR=${RESULTS_ROOT}/${SLURM_JOB_ID}_cache_serial
+RAW_DIR=${RUN_DIR}/raw
+JOB_BUILD_DIR=${RUN_DIR}/build
+SUMMARY=${RUN_DIR}/go_cache_serial.csv
+
+GRID_X=${GRID_X:-1000}
+GRID_Y=${GRID_Y:-1000}
+ITERATIONS=${ITERATIONS:-10000}
+REPEATS=${REPEATS:-3}
+RUN_ARGS=(-x "${GRID_X}" -y "${GRID_Y}" -n "${ITERATIONS}" -o 0)
+
+mkdir -p "${RAW_DIR}"
+cd "${PROJECT_DIR}"
+exec > >(tee "${RUN_DIR}/job.out") 2> >(tee "${RUN_DIR}/job.err" >&2)
+
+module purge
+module load gcc/12.2.0
+
+extract_metrics()
+{
+    awk '
+        $1 == "t_wall" { wall = $4 }
+        $1 == "t_get_total_energy" || $1 == "t_energy" { energy = $4 }
+        $1 == "t_update_plane" || $1 == "t_update" { update = $4 }
+        $1 == "t_inject_energy" || $1 == "t_inject" { inject = $4 }
+        $1 == "performance" { glups = $3 }
+        END {
+            if (wall == "" || energy == "" || update == "" ||
+                inject == "" || glups == "")
+                exit 1
+            printf "%s,%s,%s,%s,%s\n", wall, energy, update, inject, glups
+        }
+    ' "$1"
+}
+
+save_run()
+{
+    local run_name=$1
+    local variant=$2
+    local optimization=$3
+    local threads=$4
+    local executable=$5
+    local logfile=${RAW_DIR}/${run_name}.log
+    local metrics
+
+    echo "RUN ${run_name}"
+    OMP_NUM_THREADS=${threads} OMP_PLACES=cores OMP_PROC_BIND=close \
+        srun --exclusive --nodes=1 --ntasks=1 --cpus-per-task=1 \
+        --cpu-bind=cores "${executable}" "${RUN_ARGS[@]}" \
+        >"${logfile}" 2>&1
+
+    if ! metrics=$(extract_metrics "${logfile}"); then
+        echo "Unable to extract all metrics from ${logfile}" >&2
+        return 1
+    fi
+
+    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "${run_name}" "${variant}" "${optimization}" "${threads}" \
+        "${GRID_X}" "${GRID_Y}" "${ITERATIONS}" "${metrics}" \
+        >>"${SUMMARY}"
+}
+
+echo "Job ID      : ${SLURM_JOB_ID}"
+echo "Node list   : ${SLURM_JOB_NODELIST:-unknown}"
+echo "Grid        : ${GRID_X} x ${GRID_Y}"
+echo "Iterations  : ${ITERATIONS}"
+echo "Repetitions : ${REPEATS}"
+
+{
+    echo "date=$(date --iso-8601=seconds)"
+    echo "job_id=${SLURM_JOB_ID}"
+    echo "partition=${SLURM_JOB_PARTITION:-unknown}"
+    echo "nodes=${SLURM_JOB_NODELIST:-unknown}"
+    echo "grid_x=${GRID_X}"
+    echo "grid_y=${GRID_Y}"
+    echo "iterations=${ITERATIONS}"
+    echo "repetitions=${REPEATS}"
+    echo "source_mode=random"
+    echo "git_commit=$(git rev-parse HEAD 2>/dev/null || echo unavailable)"
+    echo "git_status:"
+    git status --short || true
+    gcc --version | head -n 1 || true
+    module -t list 2>&1 || true
+} >"${RUN_DIR}/environment.txt"
+
+scontrol show job "${SLURM_JOB_ID}" >"${RUN_DIR}/slurm_job.txt"
+srun --nodes=1 --ntasks=1 --cpus-per-task=1 lscpu >"${RUN_DIR}/lscpu.txt"
+git diff >"${RUN_DIR}/source_changes.patch" || true
+
+make BUILD_DIR="${JOB_BUILD_DIR}" \
+    template-serial final-serial omp-serial 2>&1 | tee "${RUN_DIR}/build.log"
+
+printf 'run_name,variant,optimization,threads,grid_x,grid_y,iterations,t_wall,t_get_total_energy,t_update_plane,t_inject_energy,glups\n' \
+    >"${SUMMARY}"
+
+for repetition in $(seq 1 "${REPEATS}"); do
+    suffix=rep$(printf '%02d' "${repetition}")
+
+    save_run "cache_template_O1_${suffix}" template O1 1 \
+        "${JOB_BUILD_DIR}/stencil_template_serial_O1"
+    save_run "cache_template_O3_${suffix}" template O3 1 \
+        "${JOB_BUILD_DIR}/stencil_template_serial_O3"
+    save_run "cache_final_O1_${suffix}" final O1 1 \
+        "${JOB_BUILD_DIR}/stencil_serial_final_O1"
+    save_run "cache_final_O3_${suffix}" final O3 1 \
+        "${JOB_BUILD_DIR}/stencil_serial_final_O3"
+    save_run "cache_openmp_O3_t001_${suffix}" openmp O3 1 \
+        "${JOB_BUILD_DIR}/stencil_serial_final_omp_O3"
+done
+
+sacct -j "${SLURM_JOB_ID}" \
+    --format=JobID,JobName,Partition,State,Elapsed,NNodes,NTasks,AllocCPUS,MaxRSS \
+    >"${RUN_DIR}/sacct.txt" || true
+
+echo "Completed. Summary: ${SUMMARY}"
+cat "${SUMMARY}"
