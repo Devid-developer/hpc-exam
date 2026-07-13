@@ -24,6 +24,7 @@ CSV_NAMES = {
     "mpi_weak": "go_mpi_weak.csv",
     "hybrid": "go_mpi_hybrid.csv",
     "hybrid_weak": "go_mpi_hybrid_weak.csv",
+    "mpi_nodes": "go_mpi_node_scaling.csv",
     "cache": "go_cache_serial.csv",
 }
 
@@ -429,21 +430,11 @@ class Plotter:
         baseline = float(frame.iloc[0]["t_wall"])
         frame["efficiency"] = 100.0 * baseline / frame["t_wall"]
 
-        fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.2))
-        axes[0].plot(
-            frame[resource], frame["t_wall"], color=BLUE, marker="o", label="Measured"
-        )
-        axes[0].axhline(
-            baseline,
-            color=CHARCOAL,
-            linestyle=(0, (4, 3)),
-            linewidth=1.6,
-            label="Ideal",
-        )
-        axes[1].plot(
+        fig, ax = plt.subplots(figsize=(9.3, 5.5))
+        ax.plot(
             frame[resource], frame["efficiency"], color=TEAL, marker="o", label="Measured"
         )
-        axes[1].axhline(
+        ax.axhline(
             100.0,
             color=CHARCOAL,
             linestyle=(0, (4, 3)),
@@ -451,20 +442,13 @@ class Plotter:
             label="Ideal",
         )
 
-        self.log2_x(axes[0], frame[resource])
-        self.log2_x(axes[1], frame[resource])
-        axes[0].set_xlabel(resource_label)
-        axes[0].set_ylabel("Wall-clock time [s]")
-        axes[0].set_title("Runtime", loc="left")
-        axes[1].set_xlabel(resource_label)
-        axes[1].set_ylabel("Weak-scaling efficiency [%]")
-        axes[1].set_title("Efficiency", loc="left")
-        axes[1].set_ylim(bottom=0)
-        for ax in axes:
-            ax.legend(loc="best")
-            self.finish_axis(ax, grid_axis="both")
-        fig.suptitle(title, x=0.06, ha="left", fontweight="bold", fontsize=16)
-        fig.subplots_adjust(top=0.82)
+        self.log2_x(ax, frame[resource])
+        ax.set_xlabel(resource_label)
+        ax.set_ylabel("Weak-scaling efficiency [%]")
+        ax.set_title(title, loc="left", pad=14)
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="best")
+        self.finish_axis(ax, grid_axis="both")
         self.save(fig, name)
 
     def openmp(self) -> None:
@@ -585,23 +569,36 @@ class Plotter:
         ]
         x = np.arange(len(labels))
 
+        if weak:
+            efficiency = 100.0 * paired["time_1"] / paired["time_2"]
+            fig, ax = plt.subplots(figsize=(9.3, 5.5))
+            ax.plot(x, efficiency, color=CORAL, marker="o", label="Measured")
+            ax.axhline(
+                100.0,
+                color=CHARCOAL,
+                linestyle=(0, (4, 3)),
+                linewidth=1.6,
+                label="Ideal",
+            )
+            ax.set_xticks(x, labels)
+            ax.set_xlabel("MPI ranks per node × OpenMP threads per rank")
+            ax.set_ylabel("Weak-scaling efficiency [%]")
+            ax.set_title("Hybrid MPI+OpenMP weak-scaling efficiency", loc="left", pad=14)
+            ax.legend(loc="best")
+            self.value_labels(ax, pd.Series(x), efficiency, 2)
+            self.finish_axis(ax)
+            self.save(fig, name)
+            return
+
         fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.2))
         axes[0].plot(x, paired["time_1"], color=BLUE, marker="o", label="1 node")
         axes[0].plot(x, paired["time_2"], color=TEAL, marker="s", label="2 nodes")
-        if weak:
-            ideal_time = paired["time_1"]
-            metric = 100.0 * paired["time_1"] / paired["time_2"]
-            ideal_metric = 100.0
-            metric_label = "Weak-scaling efficiency [%]"
-            title = "Hybrid MPI+OpenMP weak scaling"
-            ideal_label = "Ideal 2-node runtime = 1-node runtime"
-        else:
-            ideal_time = paired["time_1"] / 2.0
-            metric = paired["time_1"] / paired["time_2"]
-            ideal_metric = 2.0
-            metric_label = "Speedup from 1 to 2 nodes"
-            title = "Hybrid MPI+OpenMP strong scaling"
-            ideal_label = "Ideal 2-node runtime"
+        ideal_time = paired["time_1"] / 2.0
+        metric = paired["time_1"] / paired["time_2"]
+        ideal_metric = 2.0
+        metric_label = "Speedup from 1 to 2 nodes"
+        title = "Hybrid MPI+OpenMP strong scaling"
+        ideal_label = "Ideal 2-node runtime"
         axes[0].plot(
             x,
             ideal_time,
@@ -632,6 +629,82 @@ class Plotter:
         fig.subplots_adjust(top=0.82)
         self.save(fig, name)
 
+    def mpi_node_scaling(self) -> None:
+        if "mpi_nodes" not in self.data:
+            return
+        frame = rep01(self.data["mpi_nodes"])
+
+        strong = frame[frame["scaling"] == "strong"].sort_values("nodes").copy()
+        if not strong.empty:
+            baseline = float(strong.iloc[0]["t_wall"])
+            strong["speedup"] = baseline / strong["t_wall"]
+            nodes = strong["nodes"].to_numpy(dtype=float)
+
+            fig, ax = plt.subplots(figsize=(9.3, 5.5))
+            ax.plot(nodes, strong["speedup"], color=NAVY, marker="o", label="Measured")
+            ax.plot(
+                nodes,
+                nodes,
+                color=CHARCOAL,
+                linestyle=(0, (4, 3)),
+                linewidth=1.6,
+                label="Ideal",
+            )
+            self.log2_x(ax, nodes)
+            self.log2_y(ax, nodes)
+            ax.set_xlabel("Compute nodes")
+            ax.set_ylabel("Speedup")
+            ax.set_title("MPI+OpenMP strong scaling across nodes", loc="left", pad=14)
+            ax.text(
+                0.0,
+                1.01,
+                "4 MPI ranks/node × 8 OpenMP threads/rank · 25,000 × 25,000 · 100 iterations",
+                transform=ax.transAxes,
+                color=SLATE,
+                fontsize=9.5,
+            )
+            ax.legend(loc="upper left")
+            self.value_labels(ax, strong["nodes"], strong["speedup"], 2)
+            self.finish_axis(ax, grid_axis="both")
+            self.save(fig, "12_mpi_nodes_strong_scaling")
+
+        weak = frame[frame["scaling"] == "weak"].sort_values("nodes").copy()
+        if not weak.empty:
+            baseline = float(weak.iloc[0]["t_wall"])
+            weak["efficiency"] = 100.0 * baseline / weak["t_wall"]
+
+            fig, ax = plt.subplots(figsize=(9.3, 5.5))
+            ax.plot(
+                weak["nodes"],
+                weak["efficiency"],
+                color=TEAL,
+                marker="o",
+                label="Measured",
+            )
+            ax.axhline(
+                100.0,
+                color=CHARCOAL,
+                linestyle=(0, (4, 3)),
+                linewidth=1.6,
+                label="Ideal",
+            )
+            self.log2_x(ax, weak["nodes"])
+            ax.set_xlabel("Compute nodes")
+            ax.set_ylabel("Weak-scaling efficiency [%]")
+            ax.set_title("MPI+OpenMP weak-scaling efficiency across nodes", loc="left", pad=14)
+            ax.text(
+                0.0,
+                1.01,
+                "4 MPI ranks/node × 8 OpenMP threads/rank · constant cells/node · 100 iterations",
+                transform=ax.transAxes,
+                color=SLATE,
+                fontsize=9.5,
+            )
+            ax.legend(loc="best")
+            self.value_labels(ax, weak["nodes"], weak["efficiency"], 2)
+            self.finish_axis(ax, grid_axis="both")
+            self.save(fig, "13_mpi_nodes_weak_efficiency")
+
     def hybrid(self) -> None:
         if "hybrid" in self.data:
             self.hybrid_figure(
@@ -650,6 +723,7 @@ class Plotter:
         self.mpi()
         self.openmp_mpi_comparison()
         self.hybrid()
+        self.mpi_node_scaling()
 
 
 def main() -> None:
