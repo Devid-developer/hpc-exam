@@ -1,0 +1,3 @@
+run_name,t_wall,t_get_total_energy,t_update_plane,t_inject_energy,glups
+template_O1_rep01,196.572336,0.801701,195.770498,0.000107,0.638503
+template_O3_rep01,142.185397,0.800750,141.384484,0.000133,0.884114

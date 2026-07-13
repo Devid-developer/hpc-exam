@@ -1,4 +1,6 @@
 build/
-results/
+results/**
+!results/**/
+!results/**/go_*.csv
 slurm-*.out
 slurm-*.err
