@@ -1,4 +1,5 @@
 build/
+plots/
 results/**
 !results/**/
 !results/**/go_*.csv
