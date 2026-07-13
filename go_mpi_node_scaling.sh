@@ -6,7 +6,7 @@
 #SBATCH --hint=nomultithread
 #SBATCH --exclusive
 #SBATCH --time=00:30:00
-#SBATCH --account=IscrB_SPIESMD
+#SBATCH --account=uTS26_Tornator
 #SBATCH --partition=boost_usr_prod
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
