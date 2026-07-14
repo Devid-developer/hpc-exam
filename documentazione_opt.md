@@ -1,3 +1,5 @@
+Questa documentazione è generata dall'AI e serve per avere un quadro più completo sul progetto. Non si assumono responsabilità su eventuali errori
+
 # Ottimizzazione dello stencil 2D seriale, OpenMP, MPI e ibrido
 
 ## 1. Scopo e contesto
@@ -256,7 +258,7 @@ make run-omp          -> esempio OpenMP
 La variabile `CFLAGS` contiene `-O3 -Wall -Wextra -march=native -fopenmp
 -Iinclude -g`. I target seriali rimuovono `-fopenmp` e selezionano `-O1` oppure
 `-O3`; il target OpenMP mantiene invece `-fopenmp`. In questo modo il confronto
-seriale non include il runtime OpenMP, mentre `go_omp_serial.sh` misura anche la
+seriale non include il runtime OpenMP, mentre `sbatch/go_omp_serial.sh` misura anche la
 build OpenMP con un thread. `-O3` abilita trasformazioni aggressive sui loop e
 la vettorizzazione automatica.
 
@@ -795,15 +797,17 @@ make mpi
 
 compila `src/stencil_parallel_final.c` mediante `mpicc`, usando gli stessi flag
 `-O3 -Wall -Wextra -march=native -fopenmp -Iinclude -g` della versione OpenMP.
-Gli script dedicati sono:
+Gli script Slurm sono raccolti nella directory `sbatch/` e vanno sottomessi
+dalla root della repository, per esempio con
+`sbatch sbatch/go_mpi_node_scaling.sh`. Gli script dedicati sono:
 
-- `go_mpi_smoke.sh`: correttezza con più rank, bordi periodici e dominio non
+- `sbatch/go_mpi_smoke.sh`: correttezza con più rank, bordi periodici e dominio non
   divisibile;
-- `go_mpi_strong.sh`: sweep preliminare MPI da 1 a 64 rank;
-- `go_mpi_weak.sh`: weak scaling preliminare a 25 milioni di celle per rank;
-- `go_mpi_hybrid.sh`: sweep del rapporto rank/thread a problema fisso;
-- `go_mpi_hybrid_weak.sh`: weak scaling ibrido accoppiato fra uno e due nodi;
-- `go_mpi_node_scaling.sh`: strong e weak scaling finale da 1 a 16 nodi con
+- `sbatch/go_mpi_strong.sh`: sweep preliminare MPI da 1 a 64 rank;
+- `sbatch/go_mpi_weak.sh`: weak scaling preliminare a 25 milioni di celle per rank;
+- `sbatch/go_mpi_hybrid.sh`: sweep del rapporto rank/thread a problema fisso;
+- `sbatch/go_mpi_hybrid_weak.sh`: weak scaling ibrido accoppiato fra uno e due nodi;
+- `sbatch/go_mpi_node_scaling.sh`: strong e weak scaling finale da 1 a 16 nodi con
   configurazione fissa `4 × 8` per nodo.
 
 Ogni script produce un unico CSV con nome della run, configurazione di risorse,
