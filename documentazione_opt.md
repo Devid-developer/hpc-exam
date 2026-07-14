@@ -20,6 +20,12 @@ campagna ha quindi limitato OpenMP a 32 thread fisici per nodo e ha registrato
 nodo, compilatore, opzioni di compilazione e binding. La descrizione aggiornata
 dell'hardware è disponibile nella [documentazione CINECA di Leonardo](https://docs.hpc.cineca.it/hpc/leonardo.html).
 
+La campagna conclusiva usa fino a 16 nodi Booster, mantenendo su ogni nodo
+quattro rank MPI con otto thread OpenMP ciascuno. In questo modo il numero di
+nodi è l'unica risorsa che varia nelle misure finali di strong e weak scaling:
+la configurazione per nodo, il binding e il numero di core utilizzati per nodo
+restano costanti.
+
 I coefficienti scelti sono parte della specifica del progetto:
 
 ```c
@@ -479,7 +485,7 @@ rank usa `MPI_Wtime`. Alla fine i cinque tempi locali vengono ridotti con
 - `t_update`: solo kernel locale;
 - `t_comm`: packing, comunicazione e unpacking degli halo;
 - `t_inject`: iniezione locale;
-- `t_energy`: riduzione dell'energia;
+- `t_energy`: calcolo locale e riduzione dell'energia;
 - `t_wall`: intera simulazione temporizzata.
 
 Il massimo è la metrica corretta perché l'esecuzione globale termina alla
@@ -489,156 +495,297 @@ separatamente; non devono quindi essere sommati a posteriori come se fossero
 partizioni perfette dello stesso tempo massimo.
 
 I GLUP/s MPI sono calcolati dagli aggiornamenti globali divisi per il massimo
-di `t_update`. Il wall time resta la metrica usata per speedup ed efficienza,
-perché include anche la comunicazione:
+di `t_update`. Per i grafici di scalabilità viene invece usato `t_wall`, perché
+comprende anche comunicazione, sincronizzazione e riduzioni. Indicando con `n`
+il numero di nodi e con `T(n)` il wall time, le metriche della campagna finale
+sono:
 
 ```text
-strong speedup:     S(p) = T(1) / T(p)
-strong efficiency:  E(p) = S(p) / p
-weak efficiency:    E(p) = T(1) / T(p)
+strong speedup:     S(n) = T(1) / T(n)       ideale: S(n) = n
+strong efficiency:  E(n) = S(n) / n          ideale: E(n) = 1
+weak efficiency:    E(n) = T(1) / T(n)       ideale: E(n) = 1
 ```
 
+Negli sweep preliminari intra-nodo la risorsa variata è invece il numero di
+thread o rank. Questi test servono a studiare binding, saturazione della
+bandwidth e scelta del layout, ma non sostituiscono lo scaling finale tra nodi:
+in quest'ultimo la configurazione per nodo deve restare costante.
+
 Tutti i job usano nodi esclusivi, core fisici, compilazione `-O3
--march=native -fopenmp`, limite di 30 minuti e sorgenti pseudocasuali. Ogni
-directory dei risultati conserva CSV, output raw, informazioni Slurm, `lscpu`,
-ambiente software, commit Git e patch locale.
+-march=native -fopenmp`, limite di 30 minuti e sorgenti pseudocasuali con seed
+predefinito zero. Ogni directory dei risultati conserva CSV, output raw,
+informazioni Slurm, `lscpu`, ambiente software, commit Git e patch locale.
 
 La campagna comprende:
 
+- confronto seriale del template e della versione finale con `-O1` e `-O3`;
+- test seriale su griglia ridotta per rendere visibili gli effetti della cache;
 - OpenMP strong scaling a griglia fissa `25000 * 25000`, con binding `close` e
   `spread`;
 - OpenMP weak scaling con 25 milioni di celle per thread;
-- MPI strong scaling sulla griglia fissa `25000 * 25000`, da 1 a 64 rank;
-- MPI weak scaling con 25 milioni di celle per rank;
-- sweep ibrido a problema fisso su uno e due nodi;
-- weak scaling ibrido da `25000 * 25000` su un nodo a `50000 * 25000` su due
-  nodi, mantenendo 19,531,250 celle per core.
+- sweep MPI preliminari variando i rank su uno e due nodi;
+- sweep del rapporto MPI/OpenMP su uno e due nodi;
+- scaling finale da 1 a 16 nodi con quattro rank per nodo e otto thread per
+  rank.
 
-## 19. Risultati OpenMP
+Nel test finale lo strong scaling usa sempre `25000 * 25000` celle e 100
+iterazioni. Nel weak scaling il lato della griglia quadrata è calcolato come:
 
-### 19.1 Strong scaling e binding
+```text
+Nside(n) = round(25000 * sqrt(n / 16))
+```
 
-Con un thread entrambe le politiche partono da circa 152.16 s e 0.826 GLUP/s.
-`spread` è chiaramente preferibile fino a 16 thread:
+Poiché l'area è proporzionale al quadrato del lato, questa formula mantiene
+costante il numero di celle per nodo e porta la griglia massima a
+`25000 * 25000` sui 16 nodi.
 
-| Thread | close [s] | spread [s] | spread [GLUP/s] |
-|------:|----------:|-----------:|-----------------:|
-| 1  | 152.144 | 152.164 | 0.826 |
-| 2  | 84.466  | 77.634  | 1.619 |
-| 4  | 54.171  | 43.310  | 2.900 |
-| 8  | 40.068  | 27.057  | 4.638 |
-| 16 | 32.882  | 19.198  | 6.530 |
-| 24 | 21.597  | 21.787  | 5.749 |
-| 32 | 16.067  | 16.095  | 7.782 |
+## 19. Risultati seriali
+
+### 19.1 Griglia grande
+
+Il confronto principale usa `25000 * 25000` celle, 200 iterazioni e una sola
+ripetizione per configurazione. I dati provengono dai job
+`49268411_template_serial` e `49293861_final_serial`:
+
+| Variante | `-O1` [s] | `-O3` [s] | Speedup `-O1`/`-O3` |
+|:---------|----------:|----------:|---------------------:|
+| Template | 196.572 | 142.185 | 1.38 |
+| Finale | 207.229 | 153.376 | 1.35 |
+
+L'ottimizzazione del compilatore riduce chiaramente il tempo in entrambe le
+versioni. In questa singola misura sulla griglia grande, tuttavia, la versione
+finale non è più veloce del template: il wall time `-O3` è circa l'8% maggiore.
+Il dato va riportato senza nasconderlo. Le run sono state eseguite in job
+separati e non permettono di distinguere completamente variabilità tra nodi e
+regressione reale; soprattutto, per un working set molto maggiore delle cache,
+lo stencil è dominato dal traffico verso memoria e le semplificazioni del
+kernel non aumentano la bandwidth disponibile.
+
+La build OpenMP `-O3` con un solo thread impiega 152.164 s, sostanzialmente lo
+stesso tempo della build seriale finale `-O3`. L'abilitazione del runtime
+OpenMP non introduce quindi un overhead rilevante a un thread rispetto alla
+variabilità osservata tra job.
+
+In tutte queste misure `update_plane` rappresenta oltre il 99% del wall time:
+141.384 s su 142.185 s per il template `-O3` e 152.574 s su 153.376 s per la
+versione finale `-O3`. È quindi corretto concentrare l'analisi prestazionale
+sul kernel dello stencil.
+
+### 19.2 Griglia ridotta ed effetti della cache
+
+Il test `1000 * 1000` esegue 10,000 iterazioni e contiene tre ripetizioni per
+configurazione. I due piani occupano complessivamente circa 16 MiB, esclusi
+piccoli metadati, e possono beneficiare molto più della cache condivisa del
+processore rispetto alla griglia grande.
+
+| Variante | Compilazione | Intervallo dei wall time [s] |
+|:---------|:-------------|------------------------------:|
+| Template | `-O1` | 30.301–30.334 |
+| Template | `-O3` | 11.106–11.170 |
+| Finale | `-O1` | 15.567–15.698 |
+| Finale | `-O3` | 6.582–6.896 |
+| Finale OpenMP, 1 thread | `-O3` | 7.125–7.200 |
+
+Qui tutte le ripetizioni della versione finale `-O3` sono nettamente più
+veloci di quelle del template `-O3`, con un miglioramento di circa `1.6x`. Le
+trasformazioni sul loop e sugli accessi in memoria diventano quindi visibili
+quando il working set esercita meno pressione sulla DRAM. Il confronto tra
+griglia grande e ridotta è coerente con la natura memory-bound dello stencil:
+un'ottimizzazione può migliorare l'esecuzione in cache senza produrre lo stesso
+vantaggio una volta saturata la bandwidth della memoria principale.
+
+## 20. Risultati OpenMP
+
+### 20.1 Strong scaling e binding
+
+Con un thread entrambe le politiche partono da circa 152.16 s. `spread` è
+chiaramente preferibile fino a 16 thread:
+
+| Thread | `close` [s] | `spread` [s] | Speedup `spread` |
+|------:|------------:|-------------:|-----------------:|
+| 1  | 152.144 | 152.164 | 1.00 |
+| 2  | 84.466  | 77.634  | 1.96 |
+| 4  | 54.171  | 43.310  | 3.51 |
+| 8  | 40.068  | 27.057  | 5.62 |
+| 16 | 32.882  | 19.198  | 7.93 |
+| 24 | 21.597  | 21.787  | 6.98 |
+| 32 | 16.067  | 16.095  | 9.45 |
 
 Il vantaggio di `spread` fino a 16 thread è coerente con la suddivisione SNC
 del processore: distribuire i thread permette di usare prima entrambi i domini
 NUMA e una frazione maggiore della bandwidth. Il punto a 24 thread è non
 monotono e ricorda che binding, first touch e contesa della memoria possono
-contare più del solo numero di core. Poiché ogni punto principale contiene una
-sola ripetizione, le differenze piccole non devono essere sovrainterpretate.
+contare più del solo numero di core. A 32 thread lo speedup è `9.45x`, molto
+inferiore all'ideale `32x`, perché tutti i core condividono la stessa bandwidth
+DRAM. Poiché ogni punto contiene una sola ripetizione, le differenze piccole
+non devono essere sovrainterpretate.
 
-### 19.2 Weak scaling
+### 20.2 Weak scaling
 
 Il dominio cresce da `5000 * 5000` con un thread a `40000 * 20000` con 32
 thread, conservando 25 milioni di celle per thread. Il tempo passa da 5.753 s a
-20.908 s e il throughput totale da 0.874 a 7.668 GLUP/s. L'efficienza weak
-globale è quindi circa il 27.5%.
+20.908 s; l'efficienza weak globale è quindi circa il 27.5%.
 
 Il risultato non indica uno sbilanciamento del loop, che assegna lo stesso
 numero di celle a ogni thread. Mostra invece che i thread di uno stesso nodo
 condividono la bandwidth DRAM: aumentando le risorse di calcolo non cresce in
 proporzione la banda di memoria disponibile. Lo stencil raggiunge quindi il
-regime memory-bound.
+regime memory-bound. Questo test misura la scalabilità rispetto ai thread
+dentro un singolo nodo, non la scalabilità debole fra nodi indipendenti.
 
-## 20. Risultati MPI
+## 21. Sweep MPI preliminari
 
-### 20.1 Strong scaling
+### 21.1 Strong scaling rispetto ai rank
 
-| Rank | Nodi | Wall time [s] | t_comm [s] | GLUP/s |
-|-----:|-----:|--------------:|-----------:|-------:|
-| 1  | 1 | 152.269 | 0.000 | 0.825 |
-| 2  | 1 | 86.640  | 0.575 | 1.450 |
-| 4  | 1 | 53.375  | 0.452 | 2.359 |
-| 8  | 1 | 39.277  | 0.535 | 3.201 |
-| 16 | 1 | 32.583  | 0.577 | 3.867 |
-| 32 | 1 | 16.168  | 0.466 | 7.812 |
-| 64 | 2 | 8.056   | 0.680 | 15.799 |
+Il primo sweep MPI mantiene fissa la griglia `25000 * 25000` e aumenta i rank
+da 1 a 64, usando un thread per rank:
 
-Da 1 a 64 rank lo speedup complessivo sul wall time è circa `18.9x`. La
-scalabilità rispetto al singolo core non è ideale perché il kernel è limitato
-dalla memoria e tutti i rank di un nodo condividono lo stesso sottosistema
-DRAM. Il confronto più significativo per l'estensione multinodo è però 32
-contro 64 rank: raddoppiando nodi, core e rank, il tempo passa da 16.168 s a
-8.056 s, corrispondente a uno speedup di `2.007x`. La comunicazione inter-node
-rimane abbastanza piccola da non impedire il dimezzamento del tempo.
+| Rank | Nodi | Wall time [s] | `t_comm` [s] |
+|-----:|-----:|--------------:|---------------:|
+| 1  | 1 | 152.269 | 0.000 |
+| 2  | 1 | 86.640  | 0.575 |
+| 4  | 1 | 53.375  | 0.452 |
+| 8  | 1 | 39.277  | 0.535 |
+| 16 | 1 | 32.583  | 0.577 |
+| 32 | 1 | 16.168  | 0.466 |
+| 64 | 2 | 8.056   | 0.680 |
 
-Le prestazioni MPI e OpenMP su 32 core sono quasi identiche: 7.812 GLUP/s per
-MPI e circa 7.78 GLUP/s per OpenMP. Ciò indica che packing e halo exchange
-intra-node non dominano il kernel per questa dimensione globale.
+Da 1 a 64 rank lo speedup complessivo sul wall time è circa `18.9x`. Il
+confronto non rappresenta però il test finale di scaling per nodi: nei primi
+sei punti cresce il numero di core dentro lo stesso nodo e soltanto l'ultimo
+punto introduce un secondo nodo. È utile per mostrare saturazione della memoria
+e costo dell'halo exchange, non per tracciare una ideal line rispetto ai nodi.
 
-### 20.2 Weak scaling
+Il confronto omogeneo tra nodi pieni è 32 contro 64 rank. Raddoppiando nodi,
+core e rank, il tempo passa da 16.168 s a 8.056 s, uno speedup di `2.007x`.
+Inoltre, su 32 core, MPI e OpenMP forniscono tempi quasi identici: 16.168 s e
+16.095 s. Packing e scambio degli halo intra-nodo non dominano quindi il
+kernel per questa dimensione globale.
+
+### 21.2 Weak scaling rispetto ai rank
 
 Ogni rank conserva 25 milioni di celle. Il wall time cresce da 5.710 s con un
-rank a circa 21 s con 32 rank sullo stesso nodo, ancora a causa della bandwidth
-condivisa. Il confronto tra nodi a pieno carico è invece quasi ideale:
+rank a circa 21 s con 32 rank sullo stesso nodo, perché tutti i rank condividono
+la bandwidth DRAM. Il confronto tra nodi pieni è invece quasi ideale:
 
 ```text
-32 rank, 1 nodo: 20.969 s,  7.712 GLUP/s
-64 rank, 2 nodi: 21.007 s, 15.412 GLUP/s
+32 rank, 1 nodo: 20.969 s
+64 rank, 2 nodi: 21.007 s
 ```
 
-L'efficienza weak da uno a due nodi pieni è `20.969 / 21.007 = 99.8%`, mentre
-il throughput raddoppia quasi esattamente. Ogni nodo aggiuntivo porta con sé un
-nuovo sottosistema di memoria; questo spiega perché la scalabilità fra nodi è
-molto migliore della scalabilità aumentando i soli core all'interno del nodo.
+L'efficienza weak da uno a due nodi pieni è `20.969 / 21.007 = 99.8%`. Ogni
+nodo aggiuntivo porta con sé un nuovo sottosistema di memoria; questo anticipa
+il comportamento poi confermato dalla campagna finale fino a 16 nodi.
 
-## 21. Risultati ibridi MPI+OpenMP
+## 22. Scelta del layout ibrido MPI+OpenMP
 
-### 21.1 Sweep a problema fisso
+### 22.1 Sweep a problema fisso
 
 Sulla griglia `25000 * 25000` tutte le configurazioni a 32 core impiegano circa
 15.9 s, mentre tutte quelle a 64 core impiegano circa 8.0 s:
 
-| Rank per nodo * thread | 1 nodo [s] | 2 nodi [s] |
-|-----------------------:|-------------:|-------------:|
-| 1 * 32 | 15.957 | 8.035 |
-| 2 * 16 | 15.965 | 8.006 |
-| 4 * 8  | 15.901 | 8.010 |
-| 8 * 4  | 15.891 | 8.019 |
-| 16 * 2 | 15.898 | 7.969 |
-| 32 * 1 | 15.921 | 7.963 |
+| Rank per nodo × thread per rank | 1 nodo [s] | 2 nodi [s] |
+|--------------------------------:|-------------:|-------------:|
+| 1 × 32 | 15.957 | 8.035 |
+| 2 × 16 | 15.965 | 8.006 |
+| 4 × 8  | 15.901 | 8.010 |
+| 8 × 4  | 15.891 | 8.019 |
+| 16 × 2 | 15.898 | 7.969 |
+| 32 × 1 | 15.921 | 7.963 |
 
 La variazione tra layout è inferiore all'uno per cento. A questa scala il
 vantaggio di ridurre il numero di messaggi usando più thread è compensato dal
 costo del runtime OpenMP e dal packing di colonne più lunghe. Il caso puro MPI
-è marginalmente il più veloce, ma la differenza è troppo piccola e basata su
-una sola ripetizione per affermare una superiorità generale. Il risultato
-principale è la robustezza: tutti i rapporti MPI/OpenMP sfruttano quasi allo
-stesso modo i core disponibili.
+è marginalmente il più veloce su due nodi e `8 × 4` lo è su un nodo, ma le
+differenze sono troppo piccole e basate su una sola ripetizione per stabilire
+una graduatoria significativa. Il risultato principale è la robustezza: tutti
+i rapporti MPI/OpenMP sfruttano quasi allo stesso modo i core disponibili.
 
-### 21.2 Weak scaling ibrido
+### 22.2 Weak scaling ibrido su uno e due nodi
 
 Nel weak scaling ibrido il dominio raddoppia insieme al numero di nodi e di
 core. Ogni layout per nodo viene quindi confrontato con il proprio equivalente
 su due nodi. I wall time rimangono sempre compresi tra 15.83 e 15.98 s.
 
-| Rank per nodo * thread | Efficienza 1 -> 2 nodi |
-|-----------------------:|-------------------------:|
-| 1 * 32 | 99.62% |
-| 2 * 16 | 99.65% |
-| 4 * 8  | 99.88% |
-| 8 * 4  | 99.40% |
-| 16 * 2 | 99.77% |
-| 32 * 1 | 99.68% |
+| Rank per nodo × thread per rank | Efficienza 1 → 2 nodi |
+|--------------------------------:|-------------------------:|
+| 1 × 32 | 99.62% |
+| 2 × 16 | 99.65% |
+| 4 × 8  | 99.88% |
+| 8 × 4  | 99.40% |
+| 16 × 2 | 99.77% |
+| 32 × 1 | 99.68% |
 
-Tutte le configurazioni ottengono quindi efficienza prossima al 100%. Il
-layout `4 * 8` presenta il valore migliore nella misura corrente, ma la
-differenza rispetto agli altri casi è nell'ordine di pochi centesimi di
-secondo. È più corretto concludere che, per questo problema, la scalabilità
-multinodo è sostanzialmente indipendente dal mix MPI/OpenMP scelto.
+Tutte le configurazioni ottengono efficienza prossima al 100%. Il layout
+`4 × 8` presenta il valore migliore in questo test ed è un compromesso
+equilibrato tra numero di messaggi e parallelismo OpenMP. È stato quindi scelto
+come configurazione fissa della campagna 1–16 nodi. La scelta non implica che
+sia intrinsecamente superiore: lo sweep mostra soprattutto che il risultato è
+poco sensibile al mix MPI/OpenMP per il problema misurato.
 
-## 22. Makefile, job Slurm e riproducibilità MPI
+## 23. Scaling finale MPI+OpenMP tra nodi
+
+La campagna conclusiva è contenuta in
+`results/49349184_mpi_node_scaling/go_mpi_node_scaling.csv`. Ogni nodo usa
+quattro rank MPI, otto thread OpenMP per rank e tutti i 32 core fisici. I punti
+usano 1, 2, 4, 8 e 16 nodi; di conseguenza i rank totali sono 4, 8, 16, 32 e
+64. Ogni configurazione contiene una sola ripetizione.
+
+### 23.1 Strong scaling tra nodi
+
+Il problema rimane fisso a `25000 * 25000` celle e 100 iterazioni:
+
+| Nodi | Rank | Griglia processi | `t_wall` [s] | Speedup | Efficienza |
+|-----:|-----:|:-----------------|-------------:|--------:|-----------:|
+| 1  | 4  | 2 × 2 | 7.9589 | 1.000 | 100.0% |
+| 2  | 8  | 2 × 4 | 4.0087 | 1.985 | 99.3% |
+| 4  | 16 | 4 × 4 | 2.0350 | 3.911 | 97.8% |
+| 8  | 32 | 4 × 8 | 1.1083 | 7.181 | 89.8% |
+| 16 | 64 | 8 × 8 | 0.5185 | 15.350 | 95.9% |
+
+Il tempo passa da 7.959 s a 0.518 s. Lo speedup a 16 nodi è `15.35x` rispetto
+all'ideale `16x`, con efficienza del 95.9%. La curva rimane molto vicina alla
+ideal line in tutto l'intervallo. Il punto a 8 nodi mostra una perdita maggiore
+e poi l'efficienza risale a 16 nodi; con una sola ripetizione non è corretto
+interpretare questa non monotonicità come proprietà deterministica del codice.
+Placement dei nodi, topologia e rumore di sistema possono contribuire.
+
+Il solo `t_update` passa da 7.882 s a 0.480 s, mentre il wall time include anche
+halo exchange e riduzioni. La differenza tra scaling del kernel e scaling del
+wall time rappresenta l'overhead parallelo che impedisce di raggiungere
+esattamente la retta ideale. I valori di `t_comm` restano compresi tra circa
+0.055 e 0.163 s e non crescono monotonicamente; anche in questo caso sono
+massimi su rank potenzialmente differenti e provengono da una sola misura.
+
+### 23.2 Weak scaling tra nodi
+
+La griglia cresce secondo la radice quadrata del numero di nodi. L'arrotondamento
+del lato produce una differenza massima trascurabile nel carico per nodo:
+
+| Nodi | Griglia globale | Celle per nodo | `t_wall` [s] | `t_update` [s] | Efficienza |
+|-----:|:----------------|---------------:|-------------:|---------------:|-----------:|
+| 1  | 6250 × 6250   | 39,062,500 | 0.4894 | 0.4800 | 100.0% |
+| 2  | 8839 × 8839   | 39,063,960 | 0.5163 | 0.4805 | 94.8% |
+| 4  | 12500 × 12500 | 39,062,500 | 0.5123 | 0.4798 | 95.5% |
+| 8  | 17678 × 17678 | 39,063,960 | 0.5610 | 0.4707 | 87.2% |
+| 16 | 25000 × 25000 | 39,062,500 | 0.5267 | 0.4881 | 92.9% |
+
+Il tempo del kernel locale resta nell'intervallo 0.471–0.488 s, confermando
+che il lavoro computazionale per nodo è costante e ben bilanciato. La
+variazione maggiore del wall time deriva quindi da comunicazione,
+sincronizzazione e riduzioni, non da un aumento del carico locale. Anche il
+weak scaling mostra un minimo di efficienza a 8 nodi e un recupero a 16; il
+risultato finale del 92.9% indica che l'overhead multinodo rimane contenuto.
+
+In tutte le dieci run l'energia iniettata e quella finale coincidono e valgono
+100, come atteso per 100 iterazioni, una sorgente e condizioni periodiche
+disattivate nel caso specifico in cui la sorgente casuale non disperde una
+quantità misurabile verso il bordo nel tempo simulato. Questa uguaglianza è un
+controllo utile, ma la verifica più forte della correttezza delle condizioni al
+contorno resta il test smoke periodico/non periodico descritto nella sezione
+15.
+
+## 24. Makefile, job Slurm, grafici e riproducibilità
 
 Il target:
 
@@ -652,10 +799,12 @@ Gli script dedicati sono:
 
 - `go_mpi_smoke.sh`: correttezza con più rank, bordi periodici e dominio non
   divisibile;
-- `go_mpi_strong.sh`: strong scaling MPI da 1 a 64 rank;
-- `go_mpi_weak.sh`: weak scaling MPI a 25 milioni di celle per rank;
+- `go_mpi_strong.sh`: sweep preliminare MPI da 1 a 64 rank;
+- `go_mpi_weak.sh`: weak scaling preliminare a 25 milioni di celle per rank;
 - `go_mpi_hybrid.sh`: sweep del rapporto rank/thread a problema fisso;
-- `go_mpi_hybrid_weak.sh`: weak scaling ibrido accoppiato fra uno e due nodi.
+- `go_mpi_hybrid_weak.sh`: weak scaling ibrido accoppiato fra uno e due nodi;
+- `go_mpi_node_scaling.sh`: strong e weak scaling finale da 1 a 16 nodi con
+  configurazione fissa `4 × 8` per nodo.
 
 Ogni script produce un unico CSV con nome della run, configurazione di risorse,
 tempi massimi, GLUP/s ed energie iniettata e misurata. Gli output raw vengono
@@ -663,23 +812,63 @@ mantenuti per poter verificare il parsing e la conservazione dell'energia. Il
 caricamento dell'ambiente usa `module purge` prima di OpenMPI, evitando il
 conflitto osservato tra moduli GCC differenti durante il primo smoke test.
 
-## 23. Conclusioni della parte parallela
+`plots.py` cerca ricorsivamente i CSV sotto `results/` e genera grafici in
+inglese con ideal line. Per la campagna finale produce in particolare:
 
-L'implementazione distribuita mantiene il kernel locale semplice e sposta la
-complessità nei confini tra sottodomini. Le scelte principali sono:
+- `plots/12_mpi_nodes_strong_scaling.png`, speedup rispetto ai nodi;
+- `plots/13_mpi_nodes_weak_efficiency.png`, efficienza weak rispetto ai nodi.
 
-1. decomposizione 2D bilanciata, anche per dimensioni non divisibili;
-2. vicini e periodicità calcolati senza topologie MPI avanzate;
-3. righe comunicate direttamente e colonne impacchettate senza datatype
-   derivati;
-4. riduzioni globali limitate a energia, errori e timing;
-5. modello `MPI_THREAD_FUNNELED`, coerente con l'uso ibrido;
-6. confronto sistematico tra OpenMP, MPI puro e configurazioni ibride.
+Le directory dei risultati sono identificate dal job Slurm. Il CSV finale
+copiato nella repository locale conserva soltanto dati realmente misurati e non
+ricostruisce campi mancanti.
 
-I risultati mostrano due regimi distinti. All'interno di un nodo la scalabilità
-è limitata soprattutto dalla bandwidth di memoria, comune a thread e rank. Tra
-nodi pieni, invece, ogni nodo aggiunge memoria e bandwidth: strong e weak
-scaling risultano quasi ideali da uno a due nodi. Per il dominio studiato il
-rapporto tra MPI e OpenMP ha un effetto secondario rispetto al numero totale di
-core e nodi, e tutte le configurazioni ibride raggiungono efficienza weak
-prossima al 100%.
+## 25. Limiti dell'analisi sperimentale
+
+I risultati sono molto buoni, ma devono essere presentati insieme ai loro
+limiti:
+
+1. quasi tutti i punti contengono una sola ripetizione; non sono quindi
+   disponibili barre d'errore o una stima robusta della variabilità;
+2. i timer software misurano sezioni del programma, ma non sostituiscono
+   contatori hardware per bandwidth DRAM, cache miss o vettorizzazione;
+3. comunicazione e calcolo non sono sovrapposti: `MPI_Waitall` precede il
+   kernel, quindi un'eventuale ottimizzazione di overlap non è stata misurata;
+4. la campagna usa un solo tipo di nodo, un compilatore e un preciso schema di
+   binding; le conclusioni quantitative non vanno estese automaticamente ad
+   altre architetture;
+5. la configurazione `4 × 8` è stata scelta come layout equilibrato, non come
+   vincitore statisticamente dimostrato dello sweep;
+6. le piccole non monotonicità a 8 e 16 nodi sono compatibili con rumore e
+   placement, ma servirebbero ripetizioni per attribuirne con certezza la causa.
+
+## 26. Conclusioni
+
+La versione finale rende regolari gli accessi del kernel, esplicita il
+non-aliasing, usa allocazioni allineate e introduce parallelismo OpenMP e MPI
+senza cambiare l'operatore numerico. Sul dominio ridotto, dove il working set
+beneficia della cache, la versione seriale finale `-O3` è circa `1.6x` più
+veloce del template. Sul dominio grande questo vantaggio non compare nella
+singola misura disponibile: `update_plane` occupa oltre il 99% del tempo e la
+bandwidth della memoria principale domina il comportamento.
+
+All'interno di un nodo, aumentare thread o rank porta rapidamente alla
+saturazione della bandwidth condivisa. OpenMP e MPI puro raggiungono tempi
+quasi identici usando tutti i 32 core, e lo sweep ibrido mostra differenze
+inferiori all'uno per cento tra i diversi rapporti rank/thread. La scelta del
+layout ha quindi un effetto secondario rispetto al numero di core e soprattutto
+al numero di sottosistemi di memoria disponibili.
+
+Tra nodi, invece, ogni risorsa aggiunta porta nuovi core e nuova bandwidth
+DRAM. Con il layout fisso di quattro rank e otto thread per nodo, lo strong
+scaling raggiunge `15.35x` su 16 nodi, pari al 95.9% di efficienza. Nel weak
+scaling il kernel locale resta quasi costante e l'efficienza a 16 nodi è
+92.9%. Questi risultati mostrano una scalabilità multinodo molto vicina
+all'ideale per la dimensione studiata, pur lasciando visibili l'overhead di
+comunicazione e la variabilità della singola ripetizione.
+
+L'implementazione distribuita mantiene infine un insieme ristretto di primitive
+MPI: decomposizione e vicini sono calcolati manualmente, le colonne sono
+impacchettate senza datatype derivati e le riduzioni globali sono limitate a
+correttezza e timing. Il risultato soddisfa quindi l'obiettivo didattico
+dell'esame: collegare ottimizzazione del kernel, gerarchia di memoria, binding,
+decomposizione del dominio e misure corrette di strong e weak scaling.
