@@ -1,4 +1,5 @@
-# HPC 5-Point Stencil
+# HPC exam
+## 5-Point Stencil
 
 Optimization project for a two-dimensional five-point stencil developed for a
 High Performance Computing course. The program models energy diffusion over a
